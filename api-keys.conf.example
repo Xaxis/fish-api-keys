@@ -1,0 +1,20 @@
+# ============================================================
+# API Key Store — Example Config
+# ============================================================
+# Copy this file to: ~/.config/fish/api-keys.conf
+# Then replace the placeholder values with your real keys.
+#
+# Format:  provider.context.label = your-api-key
+# ...
+
+# --- Anthropic ---
+anthropic.work.default        = sk-ant-api03-YOUR-WORK-KEY-HERE
+anthropic.personal.default    = sk-ant-api03-YOUR-PERSONAL-KEY-HERE
+
+# --- OpenAI ---
+openai.work.default           = sk-YOUR-WORK-OPENAI-KEY-HERE
+openai.personal.default       = sk-YOUR-PERSONAL-OPENAI-KEY-HERE
+
+# --- Gemini ---
+# gemini.work.default         = AIzaSy-YOUR-WORK-GEMINI-KEY
+...
