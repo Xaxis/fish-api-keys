@@ -9,7 +9,7 @@
 
 # --------------- key store helpers ---------------
 
-set -g __api_keys_file ~/.config/fish/api_keys.conf
+set -g __api_keys_file ~/.config/fish/api-keys.conf
 
 function __api_keys_load
     # Parses api_keys.conf and sets global variables
@@ -115,7 +115,7 @@ function api -d "Manage API keys across providers and contexts"
 
             set -l key (__api_keys_get "$provider.$context.$label")
             if test $status -ne 0
-                echo "❌ No key found: $provider.$context.$label"
+                echo "❌  No key found: $provider.$context.$label"
                 echo ""
                 echo "Available keys for $provider.$context:"
                 set -l labels (__api_keys_list_for $provider $context)
@@ -132,22 +132,31 @@ function api -d "Manage API keys across providers and contexts"
             set -l var (__api_env_var $provider)
             set -gx $var $key
             set -gx __api_active_{$provider}_profile "$context/$label"
+            set -e __api_stashed_{$provider}_key
+            set -e __api_stashed_{$provider}_profile
 
-            echo "✅ $var → $provider/$context/$label ("(__api_mask_key $key)")"
+            echo "✅  $var → $provider/$context/$label ("(__api_mask_key $key)")"
 
         # --- api status ---
         case status st
-            echo "🔑 Active API Keys"
+            echo "🔑  Active API Keys"
             echo "─────────────────────────────────"
 
             for provider in anthropic openai
-                set -l var (__api_env_var $provider)
-                set -l profile_var __api_active_{$provider}_profile
+                set -l var          (__api_env_var $provider)
+                set -l profile_var  __api_active_{$provider}_profile
+                set -l stash_var    __api_stashed_{$provider}_key
+                set -l stash_prof   __api_stashed_{$provider}_profile
+
                 if set -q $var
-                    set -l masked (__api_mask_key $$var)
+                    set -l masked  (__api_mask_key $$var)
                     set -l profile $$profile_var
                     test -z "$profile"; and set profile "unknown (set externally)"
-                    printf "  %-12s %-20s %s\n" $provider $profile $masked
+                    printf "  %-12s %-24s %s\n" $provider $profile $masked
+                else if set -q $stash_var
+                    set -l masked  (__api_mask_key $$stash_var)
+                    set -l profile $$stash_prof
+                    printf "  %-12s %-24s %s  ← OFF (stashed)\n" $provider $profile $masked
                 else
                     printf "  %-12s %s\n" $provider "(not set)"
                 end
@@ -196,12 +205,16 @@ function api -d "Manage API keys across providers and contexts"
                 set -l var (__api_env_var $argv[2])
                 set -e $var
                 set -e __api_active_{$argv[2]}_profile
+                set -e __api_stashed_{$argv[2]}_key
+                set -e __api_stashed_{$argv[2]}_profile
                 echo "🗑  Cleared $var"
             else
                 for provider in anthropic openai
                     set -l var (__api_env_var $provider)
                     set -e $var
                     set -e __api_active_{$provider}_profile
+                    set -e __api_stashed_{$provider}_key
+                    set -e __api_stashed_{$provider}_profile
                 end
                 echo "🗑  Cleared all API keys from environment"
             end
@@ -209,7 +222,7 @@ function api -d "Manage API keys across providers and contexts"
         # --- api init ---
         case init
             if test -f $__api_keys_file
-                echo "⚠️  $__api_keys_file already exists. Edit it directly."
+                echo "⚠️   $__api_keys_file already exists. Edit it directly."
                 echo "   To start over, delete it first."
                 return 1
             end
@@ -241,7 +254,7 @@ function api -d "Manage API keys across providers and contexts"
 " >$__api_keys_file
 
             chmod 600 $__api_keys_file
-            echo "✅ Created $__api_keys_file (permissions: 600)"
+            echo "✅  Created $__api_keys_file (permissions: 600)"
             echo "   Edit it to add your keys, then use: api use <provider> <context> [label]"
 
         # --- api edit ---
@@ -254,6 +267,47 @@ function api -d "Manage API keys across providers and contexts"
                 $EDITOR $__api_keys_file
             else
                 open $__api_keys_file
+            end
+
+        # --- api off <provider> ---
+        case off
+            if test (count $argv) -lt 2
+                echo "Usage: api off <provider>"
+                echo "  Toggles a provider key OFF (unsets + stashes)"
+                echo "  or back ON (restores from stash)"
+                return 1
+            end
+
+            set -l provider $argv[2]
+            set -l var              (__api_env_var $provider)
+            set -l profile_var      __api_active_{$provider}_profile
+            set -l stash_var        __api_stashed_{$provider}_key
+            set -l stash_profile    __api_stashed_{$provider}_profile
+
+            if set -q $var
+                # Currently ON → stash and unset
+                set -g  $stash_var $$var
+                if set -q $profile_var
+                    set -g $stash_profile $$profile_var
+                else
+                    set -g $stash_profile "unknown (set externally)"
+                end
+                set -e $var
+                set -e $profile_var
+                set -l masked (__api_mask_key $$stash_var)
+                echo "🔕 $provider OFF — stashed $$stash_profile ($masked)"
+                echo "   Run 'api off $provider' again to restore."
+            else if set -q $stash_var
+                # Currently OFF with stash → restore
+                set -gx $var $$stash_var
+                set -gx $profile_var $$stash_profile
+                set -l masked (__api_mask_key $$var)
+                echo "🔔 $provider ON — restored $$stash_profile ($masked)"
+                set -e $stash_var
+                set -e $stash_profile
+            else
+                echo "ℹ️  $provider is not set and nothing is stashed."
+                return 1
             end
 
         # --- help / unknown ---
@@ -275,6 +329,8 @@ function __api_usage
     echo "  status                             Show active keys"
     echo "  list [provider]                    List all configured keys"
     echo "  clear [provider]                   Unset key(s) from env"
+    echo "  off <provider>                     Toggle a provider key OFF (stash) / ON (restore)"
+    echo "  api off anthropic                  # unset + stash; run again to restore"
     echo "  init                               Create starter config file"
     echo "  edit                               Open config in \$EDITOR"
     echo ""
@@ -288,8 +344,12 @@ end
 # --- tab completions ---
 
 complete -c api -f
-complete -c api -n "not __fish_seen_subcommand_from use status st list ls clear init edit help" \
-    -a "use status list clear init edit help"
+complete -c api -n "not __fish_seen_subcommand_from use status st list ls clear init edit help off" \
+    -a "use status list clear init edit help off"
+
+# Provider completion for `api off`
+complete -c api -n "__fish_seen_subcommand_from off" \
+    -a "anthropic openai" -d "provider"
 
 # Dynamic completions for `api use`
 complete -c api -n "__fish_seen_subcommand_from use; and test (count (commandline -opc)) -eq 2" \
